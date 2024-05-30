@@ -5,10 +5,9 @@ library("coxme")
 library("simsurv")
 library("ggplot2")
 library("ggpubr")
-library("survminer")
-
-# Load and examine German Breast Cancer dataset
-data(cancer, package = "survival")
+#%%
+# Load and examine myeloid data
+data(myeloid, package = "survival")
 head(myeloid)
 myeloid$trt[myeloid$trt == "A"] <- 0
 myeloid$trt[myeloid$trt == "B"] <- 1
@@ -21,15 +20,18 @@ ggsurvplot(
   data = myeloid,
   size = 1,                 # change line size
   conf.int = TRUE,          # Add confidence interval
+  censor.shape="|",
+  censor.size = 4,
   pval = TRUE,              # Add p-value
   risk.table = TRUE,        # Add risk table
   legend.labs =
     c("A", "B"),    # Change legend labels
   risk.table.height = 0.25, # Useful to change when you have multiple groups
   ggtheme = theme_bw(),      # Change ggplot2 theme
-  xlab="Time [days]"
+  xlab = "Time [days]",
+  ylab = "Overall survival"
 )
-
+#%%
 # Fit a Weibull model to the data
 mod_weib <- flexsurvspline(Surv(futime, death) ~ trt, data = myeloid, k = 0)
 
@@ -48,9 +50,19 @@ plot(mod_flex,
   ylab = "Survival probability",
   xlab = "Time"
 )
+#%%
 
 # Define a function that returns the log cumulative hazard for an FPM model
-logcumhaz <- function(t, x, betas, knots) {
+logcumhaz_weib <- function(t, x, betas, knots) {
+  basis <- flexsurv::basis(knots, log(t))
+  res <-
+    betas[["gamma0"]] * basis[[1]] +
+    betas[["gamma1"]] * basis[[2]] +
+    betas[["trt"]] * x[["trt"]]
+  res
+}
+
+logcumhaz_flex <- function(t, x, betas, knots) {
   basis <- flexsurv::basis(knots, log(t))
   res <-
     betas[["gamma0"]] * basis[[1]] +
@@ -61,24 +73,102 @@ logcumhaz <- function(t, x, betas, knots) {
   res
 }
 
+#%%
+cov <- data.frame(id = 1:650, trt = rbinom(650, 1, 0.5))
+  # Simulate event times using simsurv
+dat_weib <- simsurv(
+  betas = mod_weib$coefficients,
+  x = cov,
+  knots = mod_weib$knots,
+  logcumhazard = logcumhaz_weib,
+  maxt = 2500,
+  interval = c(1E-8, 2501)
+)
+
+dat_flex <- simsurv(
+  betas = mod_flex$coefficients,
+  x = cov,
+  knots = mod_flex$knots,
+  logcumhazard = logcumhaz_flex,
+  maxt = 2500,
+  interval = c(1E-8, 2501)
+)
+
+# Merge covariate data and event times
+dat_weib <- merge(cov, dat_weib)
+dat_flex <- merge(cov, dat_flex)
+
+#%%
+
+fit_weib <- survfit(Surv(eventtime, status) ~ trt, data = dat_weib)
+fit_flex <- survfit(Surv(eventtime, status) ~ trt, data = dat_flex)
+ggsurvplot(
+  fit_weib,
+  data = dat_weib,
+  size = 1,                 # change line size
+  conf.int = TRUE,          # Add confidence interval
+  censor.shape="|",
+  censor.size = 4,
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  legend.labs =
+    c("A", "B"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+  xlab = "Time [days]",
+  ylab = "Overall survival"
+)
+ggsurvplot(
+  fit_flex,
+  data = dat_flex,
+  size = 1,                 # change line size
+  conf.int = TRUE,          # Add confidence interval
+  censor.shape="|",
+  censor.size = 4,
+  pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  legend.labs =
+    c("A", "B"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+  xlab = "Time [days]",
+  ylab = "Overall survival"
+)
+ggsurvplot_combine(
+  list(data = fit, weib = fit_weib, flex = fit_flex),
+  data = NULL,
+  size = 0.75,                 # change line size
+  conf.int = FALSE,          # Add confidence interval
+  censor.shape="|",
+  censor.size = 0,
+  pval = TRUE,              # Add p-value
+  risk.table = FALSE,        # Add risk table
+  linetype = c("solid", "dashed","solid", "dashed","solid", "dashed"),
+  # palette = c("#f93414", "#06889b", "#fe6c31", "#006b8f", "#feae6c", "#011f51"),
+  # legend.labs =
+  #   c("A", "B"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+  xlab = "Time [days]",
+  ylab = "Overall survival"
+)
+#%%
 # Fit the FPM model to the data, to obtain the values that will be
 # used as 'true' parameter values when simulating the event times
-true_mod <- flexsurvspline(Surv(futime, death) ~ trt,
-  data = myeloid, k = 2
-)
+true_mod <- mod_flex
 
 # Define a function for conducting the simulation study
 sim_run <- function(true_mod) {
   # Covariate data
-  cov <- data.frame(id = 1:200, trt = rbinom(200, 1, 0.5))
+  cov <- data.frame(id = 1:1000, trt = rbinom(1000, 1, 0.5))
   # Simulate event times using simsurv
   dat <- simsurv(
     betas = true_mod$coefficients,
     x = cov,
     knots = true_mod$knots,
     logcumhazard = logcumhaz,
-    maxt = 500,
-    interval = c(1E-8, 501)
+    maxt = 2500,
+    interval = c(1E-8, 2501)
   )
 
   # Merge covariate data and event times
@@ -111,4 +201,4 @@ set.seed(543543)
 
 # Run 100 replicates in simulation study and report the
 # estimated mean bias under the Weibull and FPM models
-rowMeans(replicate(100, sim_run(true_mod = true_mod)))
+out <- rowMeans(replicate(20, sim_run(true_mod = true_mod)))
