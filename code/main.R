@@ -16,6 +16,9 @@ myeloid$trt[myeloid$trt == "A"] <- 0
 myeloid$trt[myeloid$trt == "B"] <- 1
 myeloid$trt <- as.numeric(myeloid$trt)
 
+# Set seed for reproducibility
+set.seed(4020)
+
 #%% plot KM overall survival
 fit <- survfit(Surv(futime, death) ~ trt, data = myeloid)
 fit_cox <- coxph(Surv(futime, death) ~ trt, data = myeloid)
@@ -64,7 +67,10 @@ lambda2 <- 1 / trt2_rmst
 
 eta <- 1 / summary(survfit(Surv(futime, !death) ~ 1, data = myeloid[myeloid$death == 1, ]))$table[5]
 
-ratio <- exp(fit_cox$coefficients)
+ratio <- 1.0
+
+sided <- 2
+hr <- exp(fit_cox$coefficients)
 
 SSE <- nSurvival(
   lambda1 = lambda1,
@@ -73,7 +79,7 @@ SSE <- nSurvival(
   Tr = 90,
   eta = eta,
   ratio = ratio,
-  alpha = 0.025,
+  alpha = 0.05,
   beta = 0.1,
   approx = TRUE
 )
@@ -103,7 +109,7 @@ logcumhaz_flex <- function(t, x, betas, knots) {
 
 #%%
 cov <- data.frame(id = 1:ceiling(SSE$n), trt = rbinom(ceiling(SSE$n), 1, 0.5))
-  # Simulate event times using simsurv
+# Simulate event times using simsurv
 dat_weib <- simsurv(
   betas = mod_weib$coefficients,
   x = cov,
@@ -177,10 +183,10 @@ ggsurvplot_combine(
   conf.int = FALSE,          # Add confidence interval
   censor.shape="|",
   censor.size = 0,
-  pval = TRUE,              # Add p-value
+  pval = FALSE,              # Add p-value
   risk.table = FALSE,        # Add risk table
-  linetype = c("solid", "dashed","solid", "dashed","solid", "dashed"),
-  # palette = c("#f93414", "#06889b", "#fe6c31", "#006b8f", "#feae6c", "#011f51"),
+  linetype = c("solid", "dashed", "solid", "dashed","solid", "dashed"),
+  # palette = c("#F8766D", "#F8766D", "#00BFC4", "#00BFC4", "#00BA38", "#00BA38"),
   # legend.labs =
   #   c("A", "B"),    # Change legend labels
   risk.table.height = 0.25, # Useful to change when you have multiple groups
@@ -232,11 +238,8 @@ sim_run <- function(true_mod) {
   )
 }
 
-# Set seed for reproducibility
-set.seed(4020)
-
 # Run 1000 replicates in simulation study and report the
 # estimated mean bias under the Weibull and FPM models
-out <- rowMeans(replicate(1000, sim_run(true_mod = true_mod)))
+out <- rowMeans(replicate(200, sim_run(true_mod = true_mod)))
 #  true_loghr    weib_bias    flex_bias
 #-0.345150476 -0.027285289 -0.003014806
